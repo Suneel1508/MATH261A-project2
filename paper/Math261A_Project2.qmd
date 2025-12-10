@@ -1,0 +1,789 @@
+---
+title: "What Explains Constructor Performance in Formula 1’s Hybrid Turbo Era?"
+author: "Suneel Chandra Vanamu"
+date: 2025-12-03
+abstract: |
+  This paper examines how engine supplier and constructor experience relate to team performance during Formula 1’s 2014–2020 Hybrid Turbo Era. Using season-level data from the F1DB dataset, I model log points as a function of engine group and years since debut, and compare these results with a LASSO model and a train–test prediction framework. Engine supplier accounts for most of the predictable variation in performance, while constructor experience adds little once engine choice is known. These findings quantify the strength of the “engine gap” often discussed in this era and show that including experience does not meaningfully improve predictive accuracy.
+thanks: "Project repository: https://github.com/Suneel1508/MATH261A-project2"
+format:
+  pdf:
+    fontsize: 10pt
+    fig-width: 5
+    fig-height: 2.6
+    fig-pos: "H"
+    include-in-header:
+      text: |
+        \usepackage{float}
+        \usepackage{caption}
+        \captionsetup[figure]{skip=4pt}
+        \setlength{\intextsep}{4pt}
+        \setlength{\textfloatsep}{6pt}
+number-sections: true
+bibliography: references.bib
+editor: visual
+---
+
+```{r}
+#| include: false
+#| echo: false
+#| warning: false
+#| message: false
+#install.packages("caret")
+```
+
+```{r}
+#| include: false
+#| echo: false
+#| warning: false
+#| message: false
+
+library(dplyr)
+library(readr)
+library(ggplot2)
+library(tidyr)
+library(knitr)
+library(janitor)
+library(broom)
+
+# Set working directory for F1DB CSV files
+data_dir <- "/Users/spartan/Desktop/Math 261/Project 2/f1db-csv"
+```
+
+```{r}
+#| include: false
+#| echo: false
+#| warning: false
+#| message: false
+
+# Color palette for consistent visuals
+pal <- list(
+  points  = "#5DA5A4",   # teal for numeric distributions
+  engine1 = "#A87C9F",   # dusty purple
+  engine2 = "#C4A46B",   # warm sand
+  engine3 = "#5C6B8A",   # steel blue
+  engine4 = "#E58870",   # soft coral
+  engine5 = "#7AA874",   # green muted
+  engine6 = "#BC6FF1",   # violet
+  line    = "#4A4E69",   # dark steel for outlines
+  text    = "#2F343B",   # dark gray for titles/axes
+  gridln  = "#E9ECEF"    # light gray gridlines
+)
+
+# Clean, minimal theme
+theme_clean <- function() {
+  theme_minimal(base_size = 12) +
+    theme(
+      plot.title    = element_text(face = "bold", color = pal$text),
+      axis.title.x  = element_text(color = pal$text),
+      axis.title.y  = element_text(color = pal$text),
+      axis.text     = element_text(color = pal$text),
+      panel.grid    = element_line(color = pal$gridln, linewidth = 0.4),
+      panel.grid.minor = element_blank(),
+      panel.grid.major.x = element_line(color = pal$gridln),
+      panel.grid.major.y = element_line(color = pal$gridln)
+    )
+}
+```
+
+# Introduction {#sec-introduction}
+
+Performance in Formula 1 reflects a mix of technical and organizational factors, and the introduction of the V6 turbo-hybrid power units in 2014 made engine programs a central component of competitive differences across teams. Engineering studies have documented large performance gaps across power-unit designs and energy-recovery systems during this era [@Cavallaro2018; @Scarf2019], while competitive analyses highlight how structural factors such as budget, experience, and continuity influence results [@Jenkins2010]. Yet these discussions seldom quantify how engine supplier performance compares with measures of team longevity, even though both factors are often cited in commentary about competitive balance.
+
+This paper asks a specific version of that question: **To what extent can constructor performance in the 2014–2020 Hybrid Turbo Era be explained by engine supplier after accounting for years since debut?** Engine programs differed substantially in reliability, efficiency, and hybrid energy deployment, while teams varied in organizational maturity. Quantifying the relative contributions of these two observable characteristics helps clarify the extent to which outcomes during this period reflect mechanical advantages versus accumulated experience.
+
+To address this, I use season-level data from the public Formula 1 Database (F1DB) linking constructor points, engine assignments, and debut years. I model log-transformed points as a function of engine supplier and constructor experience, compare a full multiple regression with a reduced engine-only specification, and use LASSO regularization and a train–test split to evaluate predictive performance. The analysis is descriptive rather than causal: the goal is to measure how strongly each factor is associated with observed performance rather than to isolate structural effects.
+
+The remainder of the paper is organized as follows. Section 2 describes the dataset and variables. Section 3 outlines the modeling framework and estimation procedures. Section 4 presents the empirical and predictive results. Section 5 discusses implications for interpreting competitive structure in the Hybrid Era and outlines limitations of the approach.
+
+# Data and Variables {#sec-data-variables}
+
+This analysis uses the public Formula 1 Database [@f1db-github], covering championship races from 2014 through 2020, corresponding to the Hybrid Turbo Era. All officially classified results are included. Race-level constructor standings were combined with engine assignment and constructor chronology records to create a season-level dataset, where the observational unit is a constructor–season. Data preparation, modeling, and visualization were conducted in R [@R-base-2024] using readr [@readr-2024], dplyr [@dplyr-2023], tidyr [@tidyr-2024], and janitor [@janitor-2023] for data cleaning; ggplot2 [@ggplot2-book-2016] for graphics; caret [@caret-2023] for stratified train–test splitting; and glmnet \[@glmnet-2010\] to fit the LASSO models. For each constructor in each season, I use the following variables:
+
+-   **Constructor points (response):** Total points scored in that season, summarizing overall competitive performance.
+-   **Engine supplier (predictor A):** A categorical variable indicating the power unit used that year (e.g., Mercedes, Ferrari, Renault, Honda, or customer rebrandings such as Tag Heuer).
+-   **Constructor experience (predictor B):** Years since the constructor’s debut, capturing organizational maturity and long-term technical continuity.
+
+After filtering to the 2014–2020 seasons and dropping entries with missing debut year or unclear engine mapping, the final dataset contains **924 constructor–season rows across 17 constructors**. This coverage includes all major engine programs and long-running teams.
+
+```{r}
+#| include: false
+#| echo: false
+#| warning: false
+#| message: false
+
+# Load F1DB tables
+engines <- read_csv(file.path(data_dir, "f1db-engines.csv"), show_col_types = FALSE)
+entrants_engines <- read_csv(file.path(data_dir, "f1db-seasons-entrants-engines.csv"), show_col_types = FALSE)
+constructors <- read_csv(file.path(data_dir, "f1db-constructors.csv"), show_col_types = FALSE)
+constructor_chrono <- read_csv(file.path(data_dir, "f1db-constructors-chronology.csv"), show_col_types = FALSE)
+constructor_standings <- read_csv(file.path(data_dir, "f1db-races-constructor-standings.csv"), show_col_types = FALSE)
+races <- read_csv(file.path(data_dir, "f1db-races.csv"), show_col_types = FALSE)
+
+# Restrict to 2014–2020 Hybrid Turbo Era
+races_era <- races %>%
+  filter(year >= 2014, year <= 2020)
+
+constructor_standings_era <- constructor_standings %>%
+  filter(raceId %in% races_era$id)
+
+# Join 1 — add race info
+joined1 <- constructor_standings_era %>%
+  left_join(
+    races_era %>% select(id, year, officialName),
+    by = c("raceId" = "id")
+  ) %>%
+  rename(year_race = year.y, year = year.x) %>%
+  select(-year_race)
+
+# Join 2 — attach engine mapping (constructor + year)
+joined2 <- joined1 %>%
+  left_join(
+    entrants_engines %>% select(year, constructorId, engineId, engineManufacturerId),
+    by = c("constructorId", "year", "engineManufacturerId")
+  )
+
+# Join 3 — add engine specifications
+joined3 <- joined2 %>%
+  left_join(
+    engines %>% select(id, name, engineManufacturerId, configuration, aspiration),
+    by = c("engineId" = "id")
+  )
+
+# Join 4 — add constructor debut year (for experience)
+merged_data <- joined3 %>%
+  left_join(
+    constructor_chrono %>% select(constructorId, yearFrom),
+    by = "constructorId"
+  )
+
+# Clean constructor–season dataset
+f1_clean <- merged_data %>%
+  transmute(
+    constructor = constructorId,
+    year = year,
+    points = points,
+    engine = coalesce(engineManufacturerId.x, engineManufacturerId.y),
+    engine_name = name,
+    config = configuration,
+    aspiration = aspiration,
+    experience = year - yearFrom
+  ) %>%
+  filter(!is.na(points), !is.na(engine), year >= 2014, year <= 2020) %>%
+  distinct(constructor, year, engine, points, .keep_all = TRUE)
+
+# Convert engine to factor for modeling
+f1_clean <- f1_clean %>%
+  mutate(engine = factor(engine))
+
+# Add log-transformed response for modeling + Data section
+f1_clean <- f1_clean %>%
+  mutate(log_points = log(points + 1))
+```
+
+## Data Limitations
+
+Two limitations are important for interpretation. First, constructor debut years are not available for all teams, so observations missing this value were excluded. This reduces the usable sample for models that include experience but preserves the competitive composition of the field. Second, engine labels occasionally include customer branding (e.g., Tag Heuer), which are treated as distinct engine groups but can be grouped more broadly if needed for interpretation.
+
+## Summary of Key Variables
+
+### Distribution of Constructor Points
+
+```{r}
+#| echo: false
+#| warning: false
+#| message: false
+#| fig-cap: "Distribution of constructor points in the 2014–2020 Hybrid Turbo Era."
+
+ggplot(f1_clean, aes(points)) +
+  geom_histogram(aes(y = after_stat(density)),
+                 bins = 30,
+                 fill = pal$points,
+                 color = pal$line,
+                 alpha = 0.6) +
+  geom_density(color = pal$line, linewidth = 0.9) +
+  labs(x = "Constructor Points",
+       y = "Density") +
+  theme_clean()
+```
+
+The raw distribution of constructor points is highly right-skewed, reflecting the dominance of a few teams. This motivates the log transformation used in the regression models.
+
+### Distribution of Log-Transformed Constructor Points
+
+Constructor points are highly right-skewed, with a few dominant teams scoring far more than the rest of the field. To reduce this skew and stabilize variance before modeling, I apply a log transformation to season points. The distribution of the transformed values is shown below.
+
+```{r}
+#| echo: false
+#| warning: false
+#| message: false
+#| fig-cap: "Distribution of log-transformed constructor points, reducing skew for modeling."
+
+ggplot(f1_clean, aes(log_points)) +
+  geom_histogram(aes(y = after_stat(density)),
+                 bins = 30,
+                 color = pal$line,
+                 fill = pal$points,
+                 alpha = 0.6) +
+  geom_density(color = pal$line, linewidth = 1) +
+  labs(x = "Log(Points + 1)", y = "Density") +
+  theme_clean()
+
+```
+
+The transformed distribution is notably more symmetric than the raw points distribution in Section 2.2.1. This motivates modeling performance on the log scale and supports the regression assumptions examined later in the paper.
+
+### Points by Engine Supplier
+
+```{r}
+#| echo: false
+#| warning: false
+#| message: false
+
+engine_summary <- f1_clean %>%
+  group_by(engine) %>%
+  summarise(
+    avg_points = mean(points, na.rm = TRUE),
+    sd_points = sd(points, na.rm = TRUE),
+    n = n(),
+    .groups = "drop"
+  ) %>%
+  arrange(desc(avg_points))
+
+kable(engine_summary,
+      caption = "Summary of constructor points by engine supplier (2014–2020).")
+```
+
+This table provides a numerical comparison of performance across engine suppliers and highlights the clear separation between groups. Teams powered by Tag Heuer–branded Renault units or Mercedes engines achieve the highest average points, while Renault-, Honda-, and customer-Mercedes–powered teams tend to score fewer points. These differences motivate including engine supplier as a categorical predictor in the regression analysis.
+
+```{r}
+#| echo: false
+#| warning: false
+#| message: false
+#| fig-cap: "Season-level points by engine supplier, showing large performance differences across engine groups."
+
+engine_colors <- c(
+  "mercedes" = pal$engine1,
+  "ferrari"  = pal$engine2,
+  "renault"  = pal$engine3,
+  "honda"    = pal$engine4,
+  "tag-heuer" = pal$engine5,
+  "bwt-mercedes" = pal$engine6
+)
+
+ggplot(f1_clean, aes(x = engine, y = points, fill = engine)) +
+  geom_boxplot(color = pal$line, alpha = 0.8) +
+  scale_fill_manual(values = engine_colors) +
+  labs(x = "Engine Supplier", y = "Constructor Points") +
+  theme_clean() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+Engine suppliers differ substantially in performance: Mercedes-powered teams have the highest and most variable results, Ferrari teams cluster lower with wide spread, and Honda and Renault engines tend to yield lower scores. These differences justify modeling engine supplier as a categorical predictor.
+
+## Bivariate Relationships
+
+### Experience vs Constructor Points
+
+```{r}
+#| echo: false
+#| warning: false
+#| message: false
+#| fig-cap: "Relationship between constructor experience and season points."
+
+ggplot(f1_clean, aes(x = experience, y = points)) +
+  geom_point(color = pal$points, alpha = 0.6, size = 2) +
+  geom_smooth(method = "lm", color = pal$line, linewidth = 1.0, se = TRUE) +
+  labs(
+    x = "Constructor Experience (Years Since Debut)",
+    y = "Constructor Points"
+  ) +
+  theme_clean()
+```
+
+Experience shows only a weak negative association with points, suggesting that team age alone is not a strong indicator of performance. This reinforces using experience as a secondary predictor in the regression models.
+
+### Constructor Experience by Engine Supplier
+
+```{r}
+#| echo: false
+#| warning: false
+#| message: false
+#| fig-cap: "Distribution of constructor experience across engine suppliers."
+
+ggplot(f1_clean, aes(x = engine, y = experience, fill = engine)) +
+  geom_boxplot(alpha = 0.8, color = pal$line) +
+  scale_fill_manual(values = engine_colors) +
+  labs(
+    x = "Engine Supplier",
+    y = "Constructor Experience (Years)"
+  ) +
+  theme_clean() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+```
+
+Experience levels differ across engine groups, but no supplier is exclusively associated with older or younger teams. This supports including both engine supplier and experience in the models.
+
+# Methods
+
+This section describes the statistical models used to examine how engine supplier and constructor experience relate to log-transformed points during the 2014–2020 Hybrid Turbo Era. The analysis includes a multiple linear regression model, a reduced engine-only model for comparison, a LASSO model for variable selection, and a train–test evaluation of predictive accuracy. All results are descriptive and measure associations rather than causal effects.
+
+## Response Transformation and Rationale
+
+Constructor points are highly right-skewed due to a small number of dominant teams. To stabilize variance and reduce the influence of extreme values, I model
+
+$$
+Y_i^*​=log(\text{points}_i​+1),
+$$
+
+where $Y_i^*$​ is the transformed response for constructor–season $i$. Adding 1 ensures that seasons with zero points are included. This transformation produces a more symmetric distribution and supports the linear-model assumptions evaluated later.
+
+```{r}
+#| include: false
+#| echo: false
+#| warning: false
+#| message: false
+
+f1_clean <- f1_clean %>%
+  mutate(
+    log_points = log(points + 1)
+  )
+
+summary(f1_clean$log_points)
+```
+
+## Multiple Linear Regression Model
+
+Let $Y_i^*$​ denote the log-transformed points scored by constructor $i$ in season $i$. Let $\text{Engine}_i$​ indicate the engine supplier (a categorical predictor), and let $\text{Exp}_i$​ denote the constructor’s experience measured as years since debut. The main regression model is
+
+$$
+Y_i​^*=β_0​+∑^{K−1}_{k=1}​β_k​1(\text{Engine}_i​=k)+β_{exp}​\text{Exp}_i​+ε_i,​
+$$
+
+where the indicator terms capture differences across engine suppliers, and $⁡\beta_{\exp}$​ represents the association between experience and log points. The error term $\varepsilon_i$​ absorbs unexplained season-level variation.
+
+To assess whether constructor experience contributes meaningfully beyond engine group, I also fit a reduced model:
+
+$$
+Y_i^*​=\alpha_0​+∑^{K−1}_{k=1}​\alpha_k​1(\text{Engine}_i​=k)+\eta_i​
+$$
+
+Comparing the two specifications tests whether experience improves explanatory power once engine differences are accounted for.
+
+```{r}
+#| include: false
+#| echo: false
+#| warning: false
+#| message: false
+
+# Ensure engine is a factor before modeling
+f1_clean <- f1_clean %>%
+  mutate(engine = factor(engine))
+
+# Build modeling dataset: complete cases
+f1_model <- f1_clean %>%
+  filter(!is.na(engine), !is.na(experience))
+
+# OPTIONAL check (silent in knit)
+nrow(f1_model)
+
+# Set Mercedes as reference engine
+f1_model <- f1_model %>%
+  mutate(engine = relevel(engine, ref = "mercedes"))
+
+# Fit OLS models
+mod_reduced  <- lm(log_points ~ engine, data = f1_model)
+mod_full     <- lm(log_points ~ engine + experience, data = f1_model)
+mod_exp_only <- lm(log_points ~ experience, data = f1_model)
+```
+
+## Hypothesis Tests
+
+Two nested-model F-tests evaluate the marginal contributions of the predictors.
+
+**Engine supplier:**
+
+$$
+H_0^{(engine)}​:β_1​=β_2​=⋯=β_{K−1}​=0,\text{ } H_1^{(engine)}:\text {at least one } β_k≠0.
+$$ This test compares the full model with a model containing only experience.
+
+**Constructor experience:**
+
+$$
+H_0^{(exp)}​:β_{exp}​=0, \text{ }H_1^{(exp)}:β_{exp}≠0.
+$$
+
+This compares the reduced engine-only model with the full model.
+
+These tests quantify whether each predictor group explains additional variation in log points.
+
+```{r}
+#| include: false
+#| echo: false
+#| warning: false
+#| message: false
+
+# Engine-effect test: does engine explain variation beyond experience?
+anova_engine <- anova(mod_exp_only, mod_full)
+
+# Experience-effect test: does experience explain variation beyond engine?
+anova_exp <- anova(mod_reduced, mod_full)
+
+
+```
+
+## LASSO Model for Variable Selection
+
+Because engine supplier and experience may overlap in the variation they explain, I use LASSO regression to assess variable importance under coefficient shrinkage. The LASSO estimator solves:
+
+$$
+\hatθ=arg\text{ min}_{\theta}​[∑^n_{i=1}​(Y_i^*​−θ_0​−x_i^⊤​θ)^2+λ∑_{j=1}^p​∣θ_j​∣]
+$$
+
+where $x_i$​ contains all engine indicators and experience. The penalty parameter $\lambda$ controls the degree of shrinkage. I select two values using 10-fold cross-validation:
+
+-   $\lambda_{\min}$​: which minimizes cross-validated error, and
+-   $\lambda_{1\text{se}}$​: a more parsimonious choice within one standard error of the minimum.
+
+Predictors set to zero under $\lambda_{1\text{se}}$λ​ are interpreted as contributing limited explanatory value once regularization is applied.
+
+```{r}
+#| include: false
+#| echo: false
+#| warning: false
+#| message: false
+
+library(glmnet)
+
+# Build LASSO model matrix (no intercept column)
+X <- model.matrix(log_points ~ engine + experience, data = f1_model)[, -1]
+y <- f1_model$log_points
+
+# Cross-validated LASSO
+set.seed(123)
+cv_lasso <- cv.glmnet(
+  X, y,
+  alpha = 1,
+  nfolds = 10,
+  standardize = TRUE
+)
+
+# Save lambda values
+lambda_min <- cv_lasso$lambda.min
+lambda_1se <- cv_lasso$lambda.1se
+
+# Fit LASSO models at selected lambdas
+lasso_min <- glmnet(X, y, alpha = 1, lambda = lambda_min, standardize = TRUE)
+lasso_1se <- glmnet(X, y, alpha = 1, lambda = lambda_1se, standardize = TRUE)
+
+# Convert sparse coefficient vectors into regular matrices for downstream use
+coef_min_mat <- as.matrix(coef(lasso_min))
+coef_1se_mat <- as.matrix(coef(lasso_1se))
+```
+
+## Predictive Evaluation
+
+To assess generalization to new constructors or seasons, I perform an 80/20 train–test split stratified by engine supplier. All models are estimated on the training set and evaluated on the test set using:
+
+-   **RMSE**: sensitivity to large errors
+-   **MAE**: typical error magnitude
+-   **Test-set** $R^2$: proportion of explainable variation
+
+Comparing predictive metrics provides an additional check on whether experience improves model performance and whether the regularized model offers meaningful benefits.
+
+```{r}
+#| include: false
+#| echo: false
+#| warning: false
+#| message: false
+
+library(caret)
+
+set.seed(2025)
+
+# Stratified train-test split by engine supplier
+train_index <- createDataPartition(f1_model$engine, p = 0.8, list = FALSE)
+train_data  <- f1_model[train_index, ]
+test_data   <- f1_model[-train_index, ]
+
+# Refit OLS models on training data
+mod_reduced_tr <- lm(log_points ~ engine, data = train_data)
+mod_full_tr    <- lm(log_points ~ engine + experience, data = train_data)
+
+# Build LASSO matrices for train/test
+X_train <- model.matrix(log_points ~ engine + experience, data = train_data)[, -1]
+y_train <- train_data$log_points
+
+X_test  <- model.matrix(log_points ~ engine + experience, data = test_data)[, -1]
+y_test  <- test_data$log_points
+
+# Fit LASSO models using lambdas from Section 3.4
+lasso_min_tr <- glmnet(X_train, y_train, alpha = 1, lambda = lambda_min,  standardize = TRUE)
+lasso_1se_tr <- glmnet(X_train, y_train, alpha = 1, lambda = lambda_1se, standardize = TRUE)
+
+# Predictions
+pred_reduced    <- predict(mod_reduced_tr, newdata = test_data)
+pred_full       <- predict(mod_full_tr,    newdata = test_data)
+pred_lasso_min  <- as.numeric(predict(lasso_min_tr, newx = X_test))
+pred_lasso_1se  <- as.numeric(predict(lasso_1se_tr, newx = X_test))
+
+# Metrics
+rmse <- function(a, b) sqrt(mean((a - b)^2))
+mae  <- function(a, b) mean(abs(a - b))
+rsq  <- function(a, b) 1 - sum((a - b)^2) / sum((b - mean(b))^2)
+
+# Save results for Section 4.5
+results_pred <- data.frame(
+  Model = c("Reduced OLS", "Full OLS", "LASSO (lambda_min)", "LASSO (lambda_1se)"),
+  RMSE  = c(rmse(pred_reduced, y_test),
+            rmse(pred_full,    y_test),
+            rmse(pred_lasso_min, y_test),
+            rmse(pred_lasso_1se, y_test)),
+  MAE   = c(mae(pred_reduced, y_test),
+            mae(pred_full,    y_test),
+            mae(pred_lasso_min, y_test),
+            mae(pred_lasso_1se, y_test)),
+  R2    = c(rsq(pred_reduced, y_test),
+            rsq(pred_full,    y_test),
+            rsq(pred_lasso_min, y_test),
+            rsq(pred_lasso_1se, y_test))
+)
+
+
+results_pred
+```
+
+## Model Assumptions
+
+The multiple regression models rely on the following assumptions about the **error terms** $\varepsilon_i$:
+
+1.  **Linearity:**\
+    The expected value of $Y_i^*$​ is a linear function of engine indicators and experience.\
+    *If violated:* coefficient estimates may be biased, and effect comparisons across engine groups may be misleading.
+2.  **Independence:**\
+    Errors across constructor–season observations are independent.\
+    *Note:* Seasons within the same constructor may be correlated; results should therefore be interpreted descriptively, not causally.
+3.  **Constant variance (homoskedasticity):** $\operatorname{Var}(\varepsilon_i)$ is roughly constant across fitted values.\
+    *If violated:* standard errors may be inaccurate; significance tests become unreliable.
+4.  **Approximate normality:**\
+    Errors are approximately normally distributed.\
+    *If violated:* confidence intervals may be distorted, though large-sample results are generally robust.
+
+I assess these assumptions using residual–fitted plots and Q–Q plots in Section 4.5. The LASSO model does not require distributional assumptions and is evaluated solely through predictive performance.
+
+# Results
+
+## Multiple Linear Regression Estimates
+
+The full OLS model shows large differences across engine suppliers. Using Mercedes as the reference category, Ferrari, Honda, Renault, and Toro Rosso–powered constructors all have substantially lower expected log points. For example, the Ferrari estimate of $–2.46$ corresponds to roughly $e^{-2.46} \approx 0.09$ times the points of a Mercedes-powered constructor, holding experience constant.
+
+These estimates indicate that engine supplier explains most of the systematic variation in constructor performance, while experience contributes only a modest incremental effect.
+
+```{r}
+#| echo: false
+#| warning: false
+#| message: false
+#| tbl-cap: "Full OLS regression coefficients for log-transformed constructor points."
+
+coef_full <- broom::tidy(mod_full)
+
+knitr::kable(
+  coef_full,
+  format = "html",
+  digits = 3
+)
+```
+
+```{r}
+#| echo: false
+#| warning: false
+#| message: false
+#| fig-cap: "Predicted vs observed log points for the full OLS model on the test set."
+
+ggplot(data.frame(
+  observed = y_test,
+  predicted = pred_full
+), aes(x = observed, y = predicted)) +
+  geom_point(alpha = 0.6, color = pal$points) +
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = pal$line) +
+  labs(
+    x = "Observed log(points + 1)",
+    y = "Predicted log(points + 1)",
+    title = "Full OLS: Predicted vs Observed"
+  ) +
+  theme_clean()
+```
+
+The coefficient on constructor experience is small and borderline significant, indicating that experience plays a limited role once engine supplier is included.
+
+## Hypothesis Test Results
+
+To assess whether engine supplier and constructor experience each provide explanatory power for performance, I use nested-model F-tests corresponding to the hypotheses defined in Section 3.3.
+
+```{r}
+#| echo: false
+#| include: false
+#| warning: false
+#| message: false
+# Hypothesis tests for marginal contributions
+
+anova_engine <- anova(mod_exp_only, mod_full)
+anova_exp    <- anova(mod_reduced, mod_full)
+
+```
+
+```{r}
+#| echo: false
+#| warning: false
+#| message: false
+#| tbl-cap: "Nested-model F-tests evaluating the marginal contributions of engine supplier and constructor experience."
+
+library(dplyr)
+
+hyp_test_results <- bind_rows(
+  tibble(
+    Test = "Engine effect (experience-only vs full model)",
+    F_statistic = anova_engine$F[2],
+    p_value = anova_engine$`Pr(>F)`[2]
+  ),
+  tibble(
+    Test = "Experience effect (engine-only vs full model)",
+    F_statistic = anova_exp$F[2],
+    p_value = anova_exp$`Pr(>F)`[2]
+  )
+)
+
+knitr::kable(hyp_test_results, digits = 5)
+
+```
+
+Nested-model F-tests confirm these patterns. The omnibus engine-effect test strongly rejects the null hypothesis $(F=37.01, p<0.00001)$, indicating that engine supplier explains substantial variation in log-transformed points even after adjusting for constructor experience. This confirms the OLS findings in Section 4.1: engine differences are large, persistent, and statistically meaningful.
+
+The experience-effect test yields $F=3.86 \text{ with } p=0.05005$, which is borderline at the $5\%$ level. This suggests that experience provides only a modest improvement in explanatory power beyond engine supplier.
+
+## LASSO Model Results
+
+The LASSO model provides a complementary perspective by shrinking weak predictors toward zero. Under the one-standard-error penalty, the coefficient for constructor experience is shrunk to exactly zero, while all engine indicators remain nonzero. This indicates that experience provides little unique explanatory value once engine differences are accounted for.
+
+```{r}
+#| echo: false
+#| warning: false
+#| message: false
+#| fig-cap: "LASSO coefficient estimates under the lambda_1se penalty."
+
+# Use the matrix created in Section 3.4
+lasso_coef_df <- as.data.frame(coef_1se_mat)
+lasso_coef_df$term <- rownames(lasso_coef_df)
+colnames(lasso_coef_df)[1] <- "estimate"
+
+# Filter out intercept
+lasso_coef_df_plot <- lasso_coef_df %>%
+  filter(term != "(Intercept)")
+
+# Plot
+ggplot(lasso_coef_df_plot, aes(x = estimate, y = term)) +
+  geom_point(color = pal$points, size = 3) +
+  geom_vline(xintercept = 0, linetype = "dashed", color = pal$line) +
+  labs(
+    x = "LASSO Coefficient (lambda_1se)",
+    y = "Predictor",
+    title = "Coefficient Shrinkage Under LASSO (lambda_1se)"
+  ) +
+  theme_clean()
+
+
+
+```
+
+The retained engine coefficients follow the same ordering as in the OLS model: Ferrari, Renault, Honda, and Toro Rosso have negative effects relative to Mercedes, with broadly similar magnitudes. The LASSO predicted-versus-observed plot shows tighter shrinkage toward the mean relative to the OLS model, which is expected given the penalization. Nonetheless, the LASSO model accurately captures group-level differences across engine suppliers while reducing variability in fitted values.
+
+```{r}
+#| echo: false
+#| warning: false
+#| message: false
+#| fig-cap: "Predicted vs observed log points for the parsimonious LASSO model on the test set."
+
+ggplot(data.frame(
+  observed = y_test,
+  predicted = pred_lasso_1se
+), aes(x = observed, y = predicted)) +
+  geom_point(alpha = 0.6, color = pal$points) +
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = pal$line) +
+  labs(
+    x = "Observed log(points + 1)",
+    y = "Predicted log(points + 1)",
+    title = "LASSO: Predicted vs Observed"
+  ) +
+  theme_clean()
+```
+
+Overall, the LASSO results corroborate the OLS findings: engine supplier is consistently the strongest predictor, and experience does not survive penalization when the model is simplified.
+
+## Predictive Evaluation Results
+
+The following table compares out-of-sample predictive accuracy across the four models. Test-set $R^2$ values range from 0.16 to 0.18, reflecting the substantial noise inherent in season-level performance. While these values are modest, they are typical for models using only structural characteristics and no race-level or driver-level information.
+
+```{r}
+#| echo: false
+#| warning: false
+#| message: false
+#| tbl-cap: "Out-of-sample predictive accuracy for four models using an 80/20 stratified train–test split."
+
+knitr::kable(
+  results_pred,
+  digits = 4,
+  format = "html"
+)
+```
+
+Several useful comparisons emerge:
+
+-   The **reduced engine-only OLS model** performs slightly better than the full OLS model.
+-   The **LASSO model using** $\lambda_{1\text{se}}$​ achieves the best performance overall, with the lowest RMSE (1.3409) and highest $R^2$ (0.1804).
+-   Including constructor experience does **not** improve predictive performance in any specification.
+
+These results indicate that engine supplier captures nearly all of the predictable structure in season-level points, while experience adds noise rather than signal from a predictive perspective. The fact that the parsimonious LASSO model performs as well as or better than more complex specifications suggests that simpler models may generalize more effectively across seasons.
+
+## Diagnostic Checks
+
+```{r}
+#| echo: false
+#| warning: false
+#| message: false
+#| fig-width: 5.2
+#| fig-height: 3.2
+#| fig-cap: "Residual–fitted plot for assessing linearity and variance."
+
+plot(mod_full, which = 1)
+
+```
+
+Residual–fitted plots do not show strong curvature, indicating that the linear structure on the log scale is reasonable. There is mild heteroskedasticity at higher fitted values, which is expected given the concentration of high-scoring constructors in a small subset of seasons.
+
+```{r}
+#| echo: false
+#| warning: false
+#| message: false
+#| fig-width: 5.2
+#| fig-height: 3.2
+#| fig-cap: "Normal Q–Q plot for standardized residuals."
+
+plot(mod_full, which = 2)
+
+```
+
+The Q–Q plot shows heavier tails than those of a normal distribution, reflecting occasional extreme performances.
+
+These deviations do not undermine the main conclusions: the linear mean structure is appropriate, the variance pattern is stable enough for inference, and the heavy tails explain why predictive accuracy remains limited even with strong group-level predictors.
+
+# Discussion
+
+This paper examined how engine supplier and constructor experience relate to team performance during Formula 1’s 2014–2020 Hybrid Turbo Era. Across all models, engine supplier was the strongest and most consistent predictor of log-transformed points, while constructor experience contributed little once engine differences were included. The LASSO model’s exclusion of the experience term reinforces this result: experience adds minimal explanatory value relative to engine program.
+
+Interpreting coefficients on the original scale shows that Ferrari, Renault, Honda, and Toro Rosso powered teams earned only a small fraction of the points expected for Mercedes-powered teams. This quantifies the widely discussed “engine gap” of the era and suggests that long-term participation does not translate into substantial performance gains when underlying mechanical differences remain large.
+
+Several limitations qualify these findings. Season-level data cannot capture race-level factors such as driver quality, development rate, reliability, or aerodynamic performance, all of which contribute to variation in outcomes. Constructor experience is only a rough proxy for organizational strength, and prediction accuracy is limited by unobserved variables.
+
+Future work could incorporate race-level performance metrics, financial data, or driver measures to separate mechanical from organizational effects. Extending the analysis to later regulation periods would also clarify whether engine-driven performance gaps persist under different technical frameworks.
+
+# References
