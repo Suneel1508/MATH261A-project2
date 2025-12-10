@@ -56,7 +56,7 @@ install.packages(c("tidyverse", "janitor", "ggplot2", "broom", "glmnet", "caret"
 ### Render the report
 
 ```bash
-quarto render Math261A_Project2_Report_v1.qmd
+quarto render Math261A_Project2.qmd
 ```
 
 or click **Render** in RStudio.
