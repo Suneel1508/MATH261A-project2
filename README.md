@@ -2,6 +2,7 @@
 
 **Author:** Suneel Chandra Vanamu
 **Course:** MATH 261A
+**Date:** December 9, 2025
 
 ## Overview
 
@@ -38,6 +39,30 @@ The response is modeled on the log scale as `log(points + 1)`.
 2. Does constructor experience add explanatory or predictive value once engine supplier is accounted for?
 3. How do OLS and LASSO compare in identifying the strongest predictors?
 4. Which model generalizes best to unseen constructor–seasons?
+
+## Repository Structure
+
+```
+MATH261A-project2/
+├─ README.md # Project overview, how to run, licensing & credits
+├─ MATH261A-project2.Rproj 
+├─ .gitignore
+
+├─ paper/ # Final paper assets
+│ ├─ Math261_Project2.qmd # Main Quarto source for the paper
+│ ├─ references.bib # Bibliography used by the QMD
+│ └─ Math261_Project2_Report.pdf # Rendered PDF
+│ └─ ... (other versions of qmd's and pdf's)
+
+├─ data/ # Data 
+│ ├─ f1db-csv/ # # Subset/derived files used in this project
+│ │ ├─ f1db-engines.csv
+│ │ ├─ f1db-races-constructor-standings.csv
+│ │ ├─ f1db-seasons-entrants-engines.csv
+│ │ └─ ... (other F1DB tables)
+```
+* **Project\_Report.qmd** knits to PDF and contains the full analysis, figures, and write-up.
+* Paths inside the `.qmd` assume CSVs live in `data/`.
 
 ## Reproducibility & Setup
 
