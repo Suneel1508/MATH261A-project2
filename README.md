@@ -33,12 +33,9 @@ Files used (placed in `f1db-csv/`):
 
 The response is modeled on the log scale as `log(points + 1)`.
 
-## Research Questions
+## Research Question
 
-1. Does engine supplier explain systematic differences in constructor points during the Hybrid Turbo Era?
-2. Does constructor experience add explanatory or predictive value once engine supplier is accounted for?
-3. How do OLS and LASSO compare in identifying the strongest predictors?
-4. Which model generalizes best to unseen constructor–seasons?
+1. To what extent can constructor performance in the 2014–2020 Hybrid Turbo Era be explained by engine supplier after accounting for years since debut?
 
 ## Repository Structure
 
