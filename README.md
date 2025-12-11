@@ -35,7 +35,7 @@ The response is modeled on the log scale as `log(points + 1)`.
 
 ## Research Question
 
-1. To what extent can constructor performance in the 2014–2020 Hybrid Turbo Era be explained by engine supplier after accounting for years since debut?
+** To what extent can constructor performance in the 2014–2020 Hybrid Turbo Era be explained by engine supplier after accounting for years since debut? **
 
 ## Repository Structure
 
